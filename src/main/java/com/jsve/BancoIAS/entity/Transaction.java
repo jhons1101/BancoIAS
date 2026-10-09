@@ -26,7 +26,14 @@ public class Transaction {
     @Column("destination_account_id")
     private String destinationAccountId;
 
+    @Column("amount")
     private BigDecimal amount;
+
+    @Column("status")
+    private String status;
+
+    @Column("reason")
+    private String reason;
 
     @Column("processed_at")
     private LocalDateTime processedAt;

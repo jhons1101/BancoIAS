@@ -21,7 +21,9 @@ INSERT INTO account_transactions (
     request_reference,
     source_account_id,
     destination_account_id,
-    amount
+    amount,
+    status,
+    reason
 ) VALUES
-      ('REF-001', 'CTA-1001', 'CTA-2001', 600000),
-      ('REF-002', 'CTA-1001', 'CTA-2001', 200000);
+      ('REF-001', 'CTA-1001', 'CTA-2001', 600000, 'PROCESSED', NULL),
+      ('REF-004', 'CTA-1001', 'CTA-2001', 1200000, 'REJECTED', 'La cuenta origen no tiene saldo suficiente para realizar la transferencia.');
