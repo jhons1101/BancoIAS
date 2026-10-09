@@ -7,9 +7,10 @@ import com.jsve.BancoIAS.repository.TransactionRepository;
 import com.jsve.BancoIAS.service.TransactionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -27,6 +28,7 @@ public class TransactionServiceImpl implements TransactionService {
     private final AccountRepository accountRepository;
 
     private final R2dbcEntityTemplate entityTemplate;
+    private final TransactionalOperator transactionalOperator;
 
     @Override
     public Flux<Transaction> getAll() {
@@ -40,8 +42,11 @@ public class TransactionServiceImpl implements TransactionService {
 
     @Override
     public Mono<Transaction> save(Transaction transaction) {
-        return transactionRepository.existsById(transaction.getRequestReference())
+
+        return transactionRepository
+                .existsById(transaction.getRequestReference())
                 .flatMap(exists -> {
+
                     if (exists) {
                         return Mono.error(new BusinessException(
                                 HttpStatus.CONFLICT,
@@ -50,32 +55,24 @@ public class TransactionServiceImpl implements TransactionService {
                     }
 
                     return validations(transaction)
-                            .then(Mono.defer(() -> {
-                                transaction.setProcessedAt(LocalDateTime.now());
-                                transaction.setStatus("PROCESSED");
-                                transaction.setReason(null);
-                                processTransaction(transaction);
-
-                                return entityTemplate.insert(Transaction.class)
-                                        .using(transaction)
-                                        .doOnNext(saved ->
-                                                System.out.println("TRANSACCIÓN GUARDADA: " + saved.getRequestReference() + " | Estado: " + saved.getStatus())
-                                        );
-                            }))
-                            .onErrorResume(BusinessException.class, exception -> {
-                                transaction.setProcessedAt(LocalDateTime.now());
-                                transaction.setStatus("REJECTED");
-                                transaction.setReason(exception.getMessage());
-
-                                return entityTemplate.insert(Transaction.class)
-                                        .using(transaction)
-                                        .doOnNext(saved ->
-                                                System.out.println("RECHAZO GUARDADO: " + saved.getRequestReference()
-                                        ));
-                            });
+                            .then(Mono.defer(() ->
+                                    transactionalOperator.transactional(
+                                            debitSource(transaction)
+                                                    .then(creditDestination(transaction))
+                                                    .then(saveProcessedTransaction(transaction))
+                                    )
+                            ))
+                            .onErrorResume(BusinessException.class,
+                                    exception -> saveRejectedTransaction(
+                                            transaction,
+                                            exception.getMessage()
+                                    )
+                            );
                 })
                 .doOnError(error ->
-                        System.err.println("ERROR AL PROCESAR TRANSACCIÓN: " + error.getMessage())
+                        System.err.println(
+                                "ERROR AL PROCESAR TRANSACCIÓN: " + error.getMessage()
+                        )
                 );
     }
 
@@ -130,19 +127,89 @@ public class TransactionServiceImpl implements TransactionService {
             );
     }
 
-    private void processTransaction(Transaction transaction) {
-        // Actualizar el saldo de la cuenta origen
-        accountRepository.findById(transaction.getSourceAccountId())
-            .flatMap(sourceAccount -> {
-                sourceAccount.setBalance(sourceAccount.getBalance().subtract(transaction.getAmount()));
-                return accountRepository.save(sourceAccount);
-            }).subscribe();
+    private Mono<Void> debitSource(Transaction transaction) {
 
-        // Actualizar el saldo de la cuenta destino
-        accountRepository.findById(transaction.getDestinationAccountId())
-            .flatMap(destinationAccount -> {
-                destinationAccount.setBalance(destinationAccount.getBalance().add(transaction.getAmount()));
-                return accountRepository.save(destinationAccount);
-            }).subscribe();
+        return accountRepository.debitIfSufficient(
+                        transaction.getSourceAccountId(),
+                        transaction.getAmount()
+                )
+                .flatMap(rowsUpdated -> {
+                    if (rowsUpdated == 1) {
+                        return Mono.<Void>empty();
+                    }
+
+                    return accountRepository.findById(transaction.getSourceAccountId())
+                            .switchIfEmpty(Mono.error(new BusinessException(
+                                    HttpStatus.NOT_FOUND,
+                                    "La cuenta origen no existe."
+                            )))
+                            .flatMap(sourceAccount -> {
+                                if (!"ACTIVE".equalsIgnoreCase(sourceAccount.getStatus())) {
+                                    return Mono.error(new BusinessException(
+                                            HttpStatus.UNPROCESSABLE_ENTITY,
+                                            "La cuenta origen no está habilitada para realizar transferencias."
+                                    ));
+                                }
+
+                                if (sourceAccount.getBalance() == null
+                                        || sourceAccount.getBalance().compareTo(transaction.getAmount()) < 0) {
+                                    return Mono.error(new BusinessException(
+                                            HttpStatus.UNPROCESSABLE_ENTITY,
+                                            "La cuenta origen no tiene saldo suficiente para realizar la transferencia."
+                                    ));
+                                }
+
+                                return Mono.error(new BusinessException(
+                                        HttpStatus.CONFLICT,
+                                        "No fue posible debitar la cuenta origen por una actualización concurrente."
+                                ));
+                            });
+                });
+    }
+
+    private Mono<Void> creditDestination(Transaction transaction) {
+        return accountRepository.creditIfActive(
+                        transaction.getDestinationAccountId(),
+                        transaction.getAmount()
+                )
+                .flatMap(rowsUpdated -> {
+                    if (rowsUpdated == 1) {
+                        return Mono.<Void>empty();
+                    }
+
+                    return Mono.error(new BusinessException(
+                            HttpStatus.CONFLICT,
+                            "No fue posible acreditar la cuenta destino."
+                    ));
+                });
+    }
+
+    private Mono<Transaction> saveRejectedTransaction(
+            Transaction transaction,
+            String reason
+    ) {
+
+        transaction.setProcessedAt(LocalDateTime.now());
+        transaction.setStatus("REJECTED");
+        transaction.setReason(reason);
+
+        return entityTemplate.insert(Transaction.class)
+                .using(transaction)
+                .doOnNext(saved -> System.out.println(
+                        "TRANSFERENCIA RECHAZADA: " + saved.getRequestReference() + " || Motivo: " + saved.getReason()
+                ));
+    }
+
+    private Mono<Transaction> saveProcessedTransaction(Transaction transaction) {
+
+        transaction.setProcessedAt(LocalDateTime.now());
+        transaction.setStatus("PROCESSED");
+        transaction.setReason(null);
+
+        return entityTemplate.insert(Transaction.class)
+                .using(transaction)
+                .doOnNext(saved -> System.out.println(
+                        "TRANSFERENCIA PROCESADA: " + saved.getRequestReference() + " | Importe: " + saved.getAmount()
+                ));
     }
 }
