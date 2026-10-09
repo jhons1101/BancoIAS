@@ -20,6 +20,7 @@ import reactor.test.StepVerifier;
 import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
@@ -88,7 +89,7 @@ class TransactionServiceImplTest {
         StepVerifier.create(service.save(transaction))
                 .assertNext(saved -> {
                     assertEquals("PROCESSED", saved.getStatus());
-                    assertEquals(null, saved.getReason());
+                    assertNull(saved.getReason());
                     assertEquals("REF-1", saved.getRequestReference());
                 })
                 .verifyComplete();

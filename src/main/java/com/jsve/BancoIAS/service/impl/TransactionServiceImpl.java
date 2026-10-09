@@ -111,18 +111,18 @@ public class TransactionServiceImpl implements TransactionService {
                        // 5. el estado de la cuenta origen debe de estar activo
                        if (!"ACTIVE".equalsIgnoreCase(sourceAccount.getStatus())) {
                            return Mono.error(new BusinessException(
-                               HttpStatus.UNPROCESSABLE_ENTITY,
+                               HttpStatus.BAD_REQUEST,
                                "La cuenta origen no está habilitada para realizar transferencias."
                            ));
                        }
                        // 6. el saldo disponible de la cuenta origen debe ser mayor o igual al monto de la transacción
                        if (sourceAccount.getBalance() == null || sourceAccount.getBalance().compareTo(transaction.getAmount()) < 0) {
                            return Mono.error(new BusinessException(
-                               HttpStatus.UNPROCESSABLE_ENTITY,
+                               HttpStatus.BAD_REQUEST,
                                "La cuenta origen no tiene saldo suficiente para realizar la transferencia."
                            ));
                        }
-                       return Mono.<Void>empty();
+                       return Mono.empty();
                    })
             );
     }
@@ -135,7 +135,7 @@ public class TransactionServiceImpl implements TransactionService {
                 )
                 .flatMap(rowsUpdated -> {
                     if (rowsUpdated == 1) {
-                        return Mono.<Void>empty();
+                        return Mono.empty();
                     }
 
                     return accountRepository.findById(transaction.getSourceAccountId())
@@ -146,7 +146,7 @@ public class TransactionServiceImpl implements TransactionService {
                             .flatMap(sourceAccount -> {
                                 if (!"ACTIVE".equalsIgnoreCase(sourceAccount.getStatus())) {
                                     return Mono.error(new BusinessException(
-                                            HttpStatus.UNPROCESSABLE_ENTITY,
+                                            HttpStatus.BAD_REQUEST,
                                             "La cuenta origen no está habilitada para realizar transferencias."
                                     ));
                                 }
@@ -154,7 +154,7 @@ public class TransactionServiceImpl implements TransactionService {
                                 if (sourceAccount.getBalance() == null
                                         || sourceAccount.getBalance().compareTo(transaction.getAmount()) < 0) {
                                     return Mono.error(new BusinessException(
-                                            HttpStatus.UNPROCESSABLE_ENTITY,
+                                            HttpStatus.BAD_REQUEST,
                                             "La cuenta origen no tiene saldo suficiente para realizar la transferencia."
                                     ));
                                 }
@@ -174,7 +174,7 @@ public class TransactionServiceImpl implements TransactionService {
                 )
                 .flatMap(rowsUpdated -> {
                     if (rowsUpdated == 1) {
-                        return Mono.<Void>empty();
+                        return Mono.empty();
                     }
 
                     return Mono.error(new BusinessException(
