@@ -135,3 +135,5 @@ Este servicio obtiene una transacción por su 'requestReference'
 | REF-004 | CTA-1001 | CTA-2001 | $1200000 | REJECTED | La cuenta origen no tiene saldo suficiente para realizar la transferencia. |
 ----
 
+#### Link para visualizar los registros de IA, desiciones importantes y datos relevantes del desarrollo
+https://1drv.ms/o/c/1494a02195ef21e6/IgAljssaGrAcRZPRo4dOplkiAVPOUJd2ybAVwYCPTbywvUA?e=ormy9A
